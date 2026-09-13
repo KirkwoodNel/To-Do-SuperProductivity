@@ -1,0 +1,15 @@
+name = "sp-todo-sync"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Create this KV namespace first (Cloudflare dashboard -> Workers & Pages -> KV,
+# or `wrangler kv namespace create sp_sync_kv`), then paste its ID below.
+kv_namespaces = [
+  { binding = "SP_SYNC_KV", id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }
+]
+
+# Secrets (set via the dashboard's Worker settings -> Variables and Secrets,
+# or `wrangler secret put <NAME>` if you end up using wrangler later):
+#   WEBDAV_USER   - username you'll also enter in Super Productivity's WebDAV sync settings
+#   WEBDAV_PASS   - password you'll also enter in Super Productivity's WebDAV sync settings
+#   DEBUG_TOKEN   - random string protecting the /debug/dump inspection endpoint
