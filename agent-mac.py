@@ -14,6 +14,7 @@ def req(url, method="GET", data=None, headers=None):
     if data is not None:
         body = json.dumps(data).encode()
         h["Content-Type"] = "application/json"
+    h.setdefault("User-Agent", "sp-todo-agent/1.0")
     r = urllib.request.Request(url, data=body, headers=h, method=method)
     with urllib.request.urlopen(r, timeout=30) as resp:
         return json.loads(resp.read().decode())
