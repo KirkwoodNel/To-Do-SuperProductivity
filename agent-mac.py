@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Poll Worker pending To Do titles and create them via Super Productivity Local REST API."""
-import json, os, time, urllib.request
+"""Poll Worker pending To Do titles; create them via Super Productivity Local REST API."""
+import json, os, subprocess, time
 
 WORKER = os.environ.get("SP_WORKER", "https://sp-todo-sync.marknelson.workers.dev")
 DEBUG = os.environ["SP_DEBUG_SECRET"]
@@ -8,34 +8,32 @@ SP = os.environ.get("SP_API", "http://127.0.0.1:3876")
 TOKEN = os.environ.get("SP_API_TOKEN", "")
 INTERVAL = int(os.environ.get("SP_POLL_SEC", "30"))
 
-def req(url, method="GET", data=None, headers=None):
-    h = headers or {}
-    body = None
+def curl(url, method="GET", data=None, bearer=None):
+    cmd = [
+        "curl", "-fsS", "--noproxy", "*",
+        "-A", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "-H", "Accept: application/json",
+        "-X", method,
+        "--max-time", "30",
+        url,
+    ]
+    if bearer:
+        cmd.extend(["-H", "Authorization: Bearer " + bearer])
     if data is not None:
-        body = json.dumps(data).encode()
-        h["Content-Type"] = "application/json"
-    h.setdefault("User-Agent", "sp-todo-agent/1.0")
-    r = urllib.request.Request(url, data=body, headers=h, method=method)
-    with urllib.request.urlopen(r, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+        cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(data)])
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.strip() or p.stdout.strip() or f"curl {p.returncode}")
+    return json.loads(p.stdout) if p.stdout.strip() else {}
 
 def worker(path, method="GET", data=None):
-    return req(
-        WORKER + path,
-        method=method,
-        data=data,
-        headers={"Authorization": "Bearer " + DEBUG},
-    )
+    return curl(WORKER + path, method=method, data=data, bearer=DEBUG)
 
 def sp(path, method="GET", data=None):
-    h = {}
-    if TOKEN:
-        h["Authorization"] = "Bearer " + TOKEN
-    return req(SP + path, method=method, data=data, headers=h)
+    return curl(SP + path, method=method, data=data, bearer=TOKEN or None)
 
 def loop():
-    health = req(SP + "/health")
-    print("SP health", health, flush=True)
+    print("SP health", sp("/health"), flush=True)
     while True:
         try:
             pending = worker("/agent/pending").get("pending") or []
