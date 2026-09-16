@@ -1,78 +1,59 @@
-# sp-todo-sync
+# sp-todo-sync — Phase 1
 
-A Cloudflare Worker that acts as a WebDAV server for Super Productivity to
-sync against, instead of Dropbox/Nextcloud/etc. Backed by Cloudflare KV.
+Read-only Cloudflare Worker. Super Productivity stays on Dropbox.
+This Worker only finds and inspects `/Apps/super_productivity/sync-data.json`.
+It does not write Dropbox or Microsoft To Do.
 
-## Why this exists
+Replaces the abandoned WebDAV Worker in this repo.
 
-Super Productivity has no public cloud API - only a "Local REST API" that
-only runs on whichever machine has the desktop app open. Its WebDAV sync
-provider, though, is fully documented and cloud-reachable, so we host the
-sync file ourselves here instead.
+## Dropbox app
 
-## What this milestone does (and doesn't) do
+- Name: `sp-todo-sync-cranberry`
+- App key: `a1gln76r3jc50zn`
+- Public clients: Disallow
+- Scopes requested at OAuth: `account_info.read files.metadata.read files.content.read`
+- Must be **Full Dropbox** (cannot see SP’s app folder otherwise)
 
-- Stores and serves whatever Super Productivity writes via WebDAV, exactly
-  as sent. This is safe by construction - we never interpret or modify the
-  file's contents, so there's no risk of corrupting anything Super
-  Productivity's own app relies on internally.
-- Honors `If-Unmodified-Since` on writes (the real conflict-detection
-  mechanism SP's WebDAV provider uses), so it won't silently clobber a
-  change SP itself hasn't seen yet.
-- Does **not** yet talk to Microsoft To Do. That needs a real sample of what
-  SP actually writes into the file first (see "Inspecting the synced file"
-  below) so the task field-mapping is built against real data, not guesses.
+## Deploy (dashboard)
 
-## Setup (via the Cloudflare dashboard - no wrangler needed)
+1. Workers → Create Worker named `sp-todo-sync` (or open it if it exists).
+2. Paste `worker.js`. Deploy.
+3. Settings → Bindings → KV. Variable name **exactly** `SP_KV`. Namespace `sp_sync_kv` (`084c7fc8b473467da90bc3001fbbd95f`).
+4. Secrets:
+   - `DEBUG_SECRET` — long random string
+   - `DROPBOX_APP_KEY`
+   - `DROPBOX_APP_SECRET`
+5. On the Dropbox app Settings page add Redirect URI:
 
-1. **Create the KV namespace**: Cloudflare dashboard -> Workers & Pages ->
-   KV -> Create a namespace. Name it e.g. `sp_sync_kv`. Copy its ID.
-2. **Create the Worker**: Workers & Pages -> Create -> Create Worker. Name
-   it `sp-todo-sync` (or anything you like).
-3. **Paste the code**: open the Worker's editor and replace the default
-   code with the contents of `worker.js` from this repo. Deploy.
-4. **Bind the KV namespace**: Worker -> Settings -> Bindings -> Add binding
-   -> KV Namespace. Variable name must be exactly `SP_SYNC_KV`, pointing at
-   the namespace you created in step 1.
-5. **Set secrets**: Worker -> Settings -> Variables and Secrets -> add
-   three **secret** (encrypted) variables:
-   - `WEBDAV_USER` - make up a username
-   - `WEBDAV_PASS` - make up a password
-   - `DEBUG_TOKEN` - any random string (used only to protect the inspection
-     endpoint below)
-6. Note your Worker's URL - it'll be something like
-   `https://sp-todo-sync.<your-subdomain>.workers.dev`.
+   `https://sp-todo-sync.<your-subdomain>.workers.dev/auth/callback`
 
-## Pointing Super Productivity at it
+6. Visit `https://sp-todo-sync.<your-subdomain>.workers.dev/auth/start` and Allow.
+7. Confirm `/health` shows `"hasRefreshToken": true`.
 
-In Super Productivity: Settings -> Sync -> choose **WebDAV** as the
-provider, and enter:
-
-- **Base URL**: your Worker's URL from step 6 above
-- **Username / Password**: the `WEBDAV_USER` / `WEBDAV_PASS` you set
-- **Sync file path**: anything you like (e.g. `/superproductivity/`) - this
-  Worker doesn't care what path SP uses, it just stores whatever it's given
-
-Trigger a manual sync in SP once you've saved those settings.
-
-## Inspecting the synced file
-
-Once SP has synced at least once, see what actually landed in KV:
+## Probe (values redacted)
 
 ```bash
-# List every path SP has written to:
-curl "https://<your-worker>.workers.dev/debug/dump?token=<DEBUG_TOKEN>"
+curl -sS -H "Authorization: Bearer $DEBUG_SECRET" \
+  https://sp-todo-sync.<subdomain>.workers.dev/debug/locate
 
-# Dump one file's raw content and metadata:
-curl "https://<your-worker>.workers.dev/debug/dump?token=<DEBUG_TOKEN>&path=/superproductivity/some-file.json"
+curl -sS -H "Authorization: Bearer $DEBUG_SECRET" \
+  https://sp-todo-sync.<subdomain>.workers.dev/debug/structure
 ```
 
-Share that output back so the real Microsoft To Do field-mapping can be
-built against your actual data instead of guesses from documentation.
+Expected locate path: `/apps/super_productivity/sync-data.json`.
+If search finds nothing, the Dropbox app is App-folder scoped — delete it and recreate as Full Dropbox.
 
-## Security note
+## Webhook test (optional in Phase 1)
 
-Anyone with your Worker's URL + WebDAV credentials can read and write your
-synced task data - treat `WEBDAV_USER`/`WEBDAV_PASS`/`DEBUG_TOKEN` like
-passwords, the same way the existing `gtd-todo-sync` Worker treats its own
-`WORKER_SECRET`.
+Add Webhook URI:
+
+`https://sp-todo-sync.<subdomain>.workers.dev/webhook/dropbox`
+
+Change a task in Super Productivity, wait one minute, then:
+
+```bash
+curl -sS -H "Authorization: Bearer $DEBUG_SECRET" \
+  https://sp-todo-sync.<subdomain>.workers.dev/debug/webhook
+```
+
+Empty hits → Full Dropbox does not notify for another app’s folder → 5-minute cron later.
